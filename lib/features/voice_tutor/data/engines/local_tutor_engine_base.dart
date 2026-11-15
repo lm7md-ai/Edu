@@ -10,6 +10,7 @@ import 'package:edu/features/voice_tutor/domain/entities/tutor_engine_event.dart
 import 'package:edu/features/voice_tutor/domain/entities/tutor_prompt.dart';
 import 'package:edu/features/voice_tutor/domain/repositories/tutor_engine_repository.dart';
 import 'package:edu/features/whiteboard/domain/entities/student_stylus_event.dart';
+import 'package:edu/features/whiteboard/presentation/controllers/audio_synced_whiteboard_step_controller.dart';
 
 /// Shared local-inference lifecycle for standalone host and Light Edge modes.
 abstract class LocalTutorEngineBase implements TutorEngineRepository {
