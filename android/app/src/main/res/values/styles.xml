@@ -1,0 +1,12 @@
+<resources>
+    <style name="LaunchTheme" parent="@android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:colorAccent">#3659A2</item>
+        <item name="android:windowBackground">#FFFFFF</item>
+    </style>
+    <style name="NormalTheme" parent="@android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:colorAccent">#3659A2</item>
+        <item name="android:windowBackground">?android:colorBackground</item>
+    </style>
+</resources>
