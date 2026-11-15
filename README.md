@@ -32,7 +32,7 @@ The Android CMake dispatcher loads the LiteRT-LM or llama.cpp backend shared lib
 
 `lib/features/rag_notes/` includes SQLite persistence for chunk text, source/document/page/section metadata, Float32 embeddings and FSRS review state; text/Markdown parsing and basic text-layer PDF extraction; cited top-K cosine retrieval; note-derived explicit Q/A and cloze cards; and an interactive Again/Hard/Good/Easy review screen. The multilingual embedding resource is lazy and unloaded in `finally` after each indexing or query-embedding operation. Scanned/image-only PDFs currently need OCR before ingestion. The vector store uses the optional `vec0` SQLite extension when a usable extension is configured; without one it uses an exact cosine-search fallback over its stored vectors. The current app does **not** bundle a sqlite-vec binary, so package a matching SQLite extension and configure `sqliteVecExtensionPathProvider` to enable vec0 acceleration.
 
-`main.dart` starts the Material 3 application in `ProviderScope`. `HomeShell` provides a responsive phone/tablet rail/navigation layout for live tutor and whiteboard controls, local curriculum/flashcards, and execution-mode QR/PIN pairing. The app composition boundary is `tutorEngineRuntimeDependenciesProvider`: the platform host must override it with installed model paths, the native worker driver, microphone PCM capture, the device's audio-synchronized playback sink/whiteboard controller, and (when tutor-side RAG grounding is enabled) a `CurriculumRagService`. Pairing credentials can be supplied through the Riverpod pairing state. The repository intentionally fails visibly rather than silently substituting a fake audio clock or missing runtime. Use a 16 kHz mono S16LE PCM stream; real playback scheduling must report a monotonic hardware played-frame counter.
+`main.dart` initializes the app-private model catalog before mounting `ProviderScope`. `HomeShell` provides responsive Tutor/whiteboard, Curriculum, Models and Settings workspaces. Its `tutorEngineRuntimeDependenciesProvider` now has safe defaults: model paths resolve into private storage, Android selects the MethodChannel worker, the microphone stream is empty until a platform capture adapter is installed, and the whiteboard remains drawable on an idle, fail-closed audio scheduler. Host pairing can start before model weights are present; inference reports missing backend/model errors without preventing notes, FSRS reviews, QR/PIN pairing or canvas use. Product integrations may override the provider with real 16 kHz mono capture and a hardware audio scheduler whose played-frame counter is monotonic; no wall-clock playback simulation is used.
 
 ### Model placement and installation
 
@@ -46,10 +46,10 @@ Model files are large and are **not** Flutter assets or Git files. Install them 
 | `moonshineWhisperAsr` | Arabic/English Moonshine or Whisper ASR | `moonshine-whisper-ar-en.litertlm` |
 | `kokoro82m` | Kokoro-82M TTS | `kokoro-82m.litertlm` |
 | `multilingualEmbedding` | BGE-M3 or multilingual E5 embeddings | `bge-m3-or-multilingual-e5.litertlm` |
-| `grammar` | Included whiteboard GBNF | `<app bundle>/assets/grammar/whiteboard.gbnf` |
+| `grammar` | Included whiteboard GBNF copied at first launch | `<app-support>/grammar/whiteboard.gbnf` |
 | `gemma4E4bGgufFallback` | Optional llama.cpp GGUF fallback | `gemma-4-e4b-fallback.gguf` |
 
-Use only compatible, licensed model conversions for the selected LiteRT-LM/llama.cpp backend and confirm each backend's expected file format. The suggested names are conventions; the runtime receives absolute paths and does not search arbitrary shared-storage locations. For security and Android scoped-storage compatibility, keep model weights in app-private storage and provide an explicit download/import flow.
+Use the in-app **Models** workspace to select compatible, licensed files from Downloads. Imports are streamed into app-private `<app-support>/models/` storage and catalogued by role, size and SHA-256; each import can be re-verified or removed. SHA-256 checks file integrity, not model compatibility, so use the accepted file formats and compatible conversions for the packaged LiteRT-LM backend. The catalog supplies absolute file paths to the runtime; model weights are never bundled in the APK. Document selection uses Android's system document picker and does not require broad storage access; `READ_EXTERNAL_STORAGE` is declared only for Android API 32 and earlier.
 
 ### Build and verification
 
@@ -69,7 +69,9 @@ Build an obfuscated, R8-minified Android App Bundle (default) or APK:
 ./scripts/build_android_release.sh apk
 ```
 
-The release script runs dependency resolution and tests first, enables `--release --obfuscate --split-debug-info --tree-shake-icons`, targets Android arm64, and stores mapping/debug information under `build/symbols/android/` by default. Preserve those symbols with the corresponding release. Android release uses R8 full mode (AGP 8+ default), code shrinking, resource shrinking, JNI/native-method keep rules and the configured CMake dispatcher. The vendor backend `.so` files still need to be supplied by the product build before model inference is available.
+The release script runs dependency resolution and tests first, enables `--release --obfuscate --split-debug-info --tree-shake-icons`, targets Android arm64, and stores mapping/debug information under `build/symbols/android/` by default. Preserve those symbols with the corresponding release. Android release uses R8 full mode (AGP 8+ default), code/resource shrinking, JNI/native-method keep rules, Android NDK 27, and the CMake dispatcher. The vendor backend `.so` files still need to be supplied by the product build before model inference is available.
+
+`.github/workflows/build_android_apk.yml` runs on pushes to `main` and manual dispatch. It installs Java 17, Android SDK/NDK/CMake and stable Flutter, then resolves dependencies, analyzes, tests, and builds the requested obfuscated arm64 APK. Each successful run uploads the APK as `edu-tutor-release-apk`, uploads obfuscation symbols as `edu-tutor-release-debug-info`, and creates a tagged GitHub Release with the APK attached. Keep the symbols artifact for native crash symbolication; it is retained for 90 days.
 
 ## Five-phase architecture summary
 

@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 
 import 'package:edu/features/rag_notes/data/sqlite_vec_store.dart';
+import 'package:edu/features/rag_notes/domain/entities/curriculum_note.dart';
 import 'package:edu/features/rag_notes/domain/entities/document_chunk.dart';
 import 'package:edu/features/rag_notes/domain/entities/flashcard.dart';
 import 'package:edu/features/rag_notes/domain/entities/fsrs_card_state.dart';
@@ -81,6 +82,27 @@ void main() {
     store.removeSource('source');
     expect(store.search(Float32List.fromList(<double>[0, 1, 0])), isEmpty);
     expect(store.loadFlashcards(), isEmpty);
+  });
+
+  test('stores local source notes independently from embeddings', () {
+    final now = DateTime.utc(2026, 11, 15);
+    store.saveNote(CurriculumNote(
+      sourceId: 'offline-note',
+      title: 'Offline note',
+      filename: 'lesson.md',
+      content: 'A saved note remains available without an embedding model.',
+      updatedAt: now,
+    ));
+
+    final loaded = store.loadNotes();
+    expect(loaded, hasLength(1));
+    expect(loaded.single.sourceId, 'offline-note');
+    expect(loaded.single.filename, 'lesson.md');
+    expect(loaded.single.content, contains('without an embedding model'));
+    expect(loaded.single.updatedAt, now);
+
+    store.removeSource('offline-note');
+    expect(store.loadNotes(), isEmpty);
   });
 
   test('rejects wrong dimensions, non-finite vectors, and invalid search limits', () {

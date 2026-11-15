@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 import 'dart:typed_data';
 
+import 'package:edu/features/rag_notes/domain/entities/curriculum_note.dart';
 import 'package:edu/features/rag_notes/domain/entities/document_chunk.dart';
 import 'package:edu/features/rag_notes/domain/entities/flashcard.dart';
 import 'package:edu/features/rag_notes/domain/entities/fsrs_card_state.dart';
@@ -54,6 +55,15 @@ final class SqliteVecStore {
     _database.execute('''
       CREATE INDEX IF NOT EXISTS rag_chunks_source_idx
       ON rag_chunks(source_id, page_index, section_index)
+    ''');
+    _database.execute('''
+      CREATE TABLE IF NOT EXISTS rag_notes (
+        source_id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        filename TEXT NOT NULL,
+        content TEXT NOT NULL,
+        updated_at_ms INTEGER NOT NULL
+      )
     ''');
     _database.execute('''
       CREATE TABLE IF NOT EXISTS rag_flashcards (
@@ -232,6 +242,48 @@ final class SqliteVecStore {
         text: row['content'] as String,
       );
 
+  /// Stores source text independently of embeddings so notes remain usable
+  /// before a local embedding model has been installed.
+  void saveNote(CurriculumNote note) {
+    _ensureOpen();
+    if (note.sourceId.trim().isEmpty || note.title.trim().isEmpty || note.content.trim().isEmpty) {
+      throw ArgumentError('A local curriculum note requires an id, title, and content.');
+    }
+    _database.execute(
+      '''INSERT INTO rag_notes(source_id, title, filename, content, updated_at_ms)
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(source_id) DO UPDATE SET title = excluded.title,
+           filename = excluded.filename, content = excluded.content,
+           updated_at_ms = excluded.updated_at_ms''',
+      <Object?>[
+        note.sourceId,
+        note.title,
+        note.filename,
+        note.content,
+        note.updatedAt.toUtc().millisecondsSinceEpoch,
+      ],
+    );
+  }
+
+  List<CurriculumNote> loadNotes({int limit = 100}) {
+    _ensureOpen();
+    if (limit < 1) throw ArgumentError.value(limit, 'limit');
+    final rows = _database.select(
+      'SELECT * FROM rag_notes ORDER BY updated_at_ms DESC LIMIT ?',
+      <Object?>[limit],
+    );
+    return rows.map((row) => CurriculumNote(
+      sourceId: row['source_id'] as String,
+      title: row['title'] as String,
+      filename: row['filename'] as String,
+      content: row['content'] as String,
+      updatedAt: DateTime.fromMillisecondsSinceEpoch(
+        row['updated_at_ms'] as int,
+        isUtc: true,
+      ),
+    )).toList(growable: false);
+  }
+
   void removeSource(String sourceId) {
     _ensureOpen();
     _database.execute('BEGIN IMMEDIATE');
@@ -244,6 +296,7 @@ final class SqliteVecStore {
       }
       _database.execute('DELETE FROM rag_chunks WHERE source_id = ?', <Object?>[sourceId]);
       _database.execute('DELETE FROM rag_flashcards WHERE source_id = ?', <Object?>[sourceId]);
+      _database.execute('DELETE FROM rag_notes WHERE source_id = ?', <Object?>[sourceId]);
       _database.execute('COMMIT');
     } on Object {
       _database.execute('ROLLBACK');

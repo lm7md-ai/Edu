@@ -3,6 +3,13 @@ import 'package:edu/features/rag_notes/domain/entities/flashcard.dart';
 import 'package:edu/features/rag_notes/domain/entities/fsrs_card_state.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+typedef _ScheduleExpectation = ({
+  double difficulty,
+  double stability,
+  int intervalDays,
+  int lapses,
+});
+
 void main() {
   group('FsrsScheduler', () {
     final scheduler = FsrsScheduler();
@@ -13,6 +20,12 @@ void main() {
         scheduler.retrievability(stabilityDays: 2, elapsedDays: 0),
         closeTo(1, 1e-12),
       );
+      expect(
+        scheduler.retrievability(stabilityDays: 2, elapsedDays: 5),
+        closeTo(0.8195941821161696, 1e-12),
+      );
+      // With R(t) = (1 + (19/81) * t / S)^-0.5, this elapsed
+      // interval gives exactly one-half retrievability.
       final elapsedForHalfRetention = 3 * 2 / (19 / 81);
       expect(
         scheduler.retrievability(
@@ -27,73 +40,190 @@ void main() {
       );
     });
 
-    test('first review initializes stability from each rating and schedules due date', () {
-      final expectedStability = <FsrsRating, double>{
-        FsrsRating.again: 0.4,
-        FsrsRating.hard: 0.6,
-        FsrsRating.good: 2.4,
-        FsrsRating.easy: 5.8,
+    test(
+      'first review initializes difficulty, stability, counters and due date by grade',
+      () {
+        const expected = <FsrsRating, _ScheduleExpectation>{
+          FsrsRating.again: (
+            difficulty: 4.93,
+            stability: 0.4,
+            intervalDays: 1,
+            lapses: 1,
+          ),
+          FsrsRating.hard: (
+            difficulty: 3.3700185816707284,
+            stability: 0.6,
+            intervalDays: 1,
+            lapses: 0,
+          ),
+          FsrsRating.good: (
+            difficulty: 1,
+            stability: 2.4,
+            intervalDays: 2,
+            lapses: 0,
+          ),
+          FsrsRating.easy: (
+            difficulty: 1,
+            stability: 5.8,
+            intervalDays: 6,
+            lapses: 0,
+          ),
+        };
+
+        for (final rating in FsrsRating.values) {
+          final reviewed = scheduler.review(_card(now), rating, reviewedAt: now);
+          final reference = expected[rating]!;
+          expect(reviewed.state.difficulty, closeTo(reference.difficulty, 1e-12));
+          expect(reviewed.state.stability, closeTo(reference.stability, 1e-12));
+          expect(reviewed.state.lastReviewedAt, now);
+          expect(
+            reviewed.state.dueAt,
+            now.add(Duration(days: reference.intervalDays)),
+          );
+          expect(reviewed.state.repetitions, 1);
+          expect(reviewed.state.lapses, reference.lapses);
+        }
+      },
+    );
+
+    test('repeat-review difficulty, stability and intervals match FSRS-4.5 math', () {
+      final firstGood = scheduler.review(_card(now), FsrsRating.good, reviewedAt: now);
+      final reviewedAt = now.add(const Duration(days: 5));
+      final retrievability = scheduler.retrievability(
+        stabilityDays: firstGood.state.stability,
+        elapsedDays: 5,
+      );
+      expect(retrievability, closeTo(0.8195941821161696, 1e-12));
+
+      const expected = <FsrsRating, _ScheduleExpectation>{
+        FsrsRating.again: (
+          difficulty: 2.7028,
+          stability: 1.3435264552538189,
+          intervalDays: 1,
+          lapses: 1,
+        ),
+        FsrsRating.hard: (
+          difficulty: 1.8514,
+          stability: 7.019084321820863,
+          intervalDays: 7,
+          lapses: 0,
+        ),
+        FsrsRating.good: (
+          difficulty: 1,
+          stability: 19.810179668797495,
+          intervalDays: 20,
+          lapses: 0,
+        ),
+        FsrsRating.easy: (
+          difficulty: 1,
+          stability: 47.840568935561464,
+          intervalDays: 48,
+          lapses: 0,
+        ),
       };
-      final intervals = <FsrsRating, int>{};
+
       for (final rating in FsrsRating.values) {
-        final reviewed = scheduler.review(_card(now), rating, reviewedAt: now);
-        expect(reviewed.state.stability, expectedStability[rating]);
-        expect(reviewed.state.difficulty, allOf(greaterThanOrEqualTo(1), lessThanOrEqualTo(10)));
-        expect(reviewed.state.lastReviewedAt, now);
-        expect(reviewed.state.repetitions, 1);
-        expect(reviewed.state.lapses, rating == FsrsRating.again ? 1 : 0);
-        final interval = reviewed.state.dueAt.difference(now).inDays;
-        expect(interval, greaterThanOrEqualTo(1));
-        intervals[rating] = interval;
+        final reviewed = scheduler.review(firstGood, rating, reviewedAt: reviewedAt);
+        final reference = expected[rating]!;
+        expect(reviewed.state.difficulty, closeTo(reference.difficulty, 1e-10));
+        expect(reviewed.state.stability, closeTo(reference.stability, 1e-10));
+        expect(
+          reviewed.state.dueAt,
+          reviewedAt.add(Duration(days: reference.intervalDays)),
+        );
+        expect(reviewed.state.lastReviewedAt, reviewedAt);
+        expect(reviewed.state.repetitions, 2);
+        expect(reviewed.state.lapses, reference.lapses);
       }
-      expect(intervals[FsrsRating.again], 1);
-      expect(intervals[FsrsRating.hard], 1);
-      expect(intervals[FsrsRating.good], 2);
-      expect(intervals[FsrsRating.easy], 6);
+
+      // Review branches are immutable and do not mutate the shared prior card.
+      expect(firstGood.state.stability, 2.4);
+      expect(firstGood.state.repetitions, 1);
+      expect(firstGood.state.lapses, 0);
     });
 
-    test('review updates stability, difficulty, retrievability and counters', () {
-      final first = scheduler.review(_card(now), FsrsRating.good, reviewedAt: now);
-      final dueLater = now.add(const Duration(days: 5));
-      final hard = scheduler.review(first, FsrsRating.hard, reviewedAt: dueLater);
-      final good = scheduler.review(first, FsrsRating.good, reviewedAt: dueLater);
-      final easy = scheduler.review(first, FsrsRating.easy, reviewedAt: dueLater);
-      final again = scheduler.review(first, FsrsRating.again, reviewedAt: dueLater);
+    test('desired retention uses the stability-to-interval formula', () {
+      final lowerRetention = FsrsScheduler(desiredRetention: 0.8)
+          .review(_card(now), FsrsRating.good, reviewedAt: now);
+      final higherRetention = FsrsScheduler(desiredRetention: 0.95)
+          .review(_card(now), FsrsRating.easy, reviewedAt: now);
 
-      expect(hard.state.stability, lessThan(good.state.stability));
-      expect(easy.state.stability, greaterThan(good.state.stability));
-      expect(again.state.stability, lessThan(first.state.stability));
-      expect(again.state.difficulty, greaterThan(good.state.difficulty));
-      expect(easy.state.difficulty, lessThan(good.state.difficulty));
-      expect(hard.state.repetitions, 2);
-      expect(again.state.lapses, 1);
-      expect(good.state.lastReviewedAt, dueLater);
-      expect(good.state.dueAt.isAfter(dueLater), isTrue);
-    });
-
-    test('intervals obey the desired-retention formula and configured cap', () {
-      final desired = FsrsScheduler(desiredRetention: 0.8);
-      final moreConservative = FsrsScheduler(desiredRetention: 0.95);
-      final card = _card(now);
-      final lowerRetention = desired.review(card, FsrsRating.easy, reviewedAt: now);
-      final higherRetention = moreConservative.review(card, FsrsRating.easy, reviewedAt: now);
+      // I = S / (19/81) * (R^(-2) - 1), rounded to whole days.
+      expect(lowerRetention.state.dueAt, now.add(const Duration(days: 6)));
+      expect(higherRetention.state.dueAt, now.add(const Duration(days: 3)));
       expect(higherRetention.state.dueAt.isBefore(lowerRetention.state.dueAt), isTrue);
+    });
+
+    test('review intervals are rounded to days, bounded below and capped above', () {
+      final newAgain = scheduler.review(_card(now), FsrsRating.again, reviewedAt: now);
+      expect(newAgain.state.dueAt, now.add(const Duration(days: 1)));
 
       final capped = FsrsScheduler(maximumIntervalDays: 3)
-          .review(card, FsrsRating.easy, reviewedAt: now);
-      expect(capped.state.dueAt.difference(now).inDays, lessThanOrEqualTo(3));
+          .review(_card(now), FsrsRating.easy, reviewedAt: now);
+      expect(capped.state.dueAt, now.add(const Duration(days: 3)));
+
+      final longMemory = _card(now).copyWith(
+        state: FsrsCardState(
+          stability: 50000,
+          difficulty: 5,
+          lastReviewedAt: now,
+          dueAt: now,
+          repetitions: 8,
+        ),
+      );
+      final stillCapped = scheduler.review(
+        longMemory,
+        FsrsRating.easy,
+        reviewedAt: now.add(const Duration(days: 1)),
+      );
+      expect(stillCapped.state.dueAt, now.add(const Duration(days: 36501)));
+    });
+
+    test('difficulty stays clamped and lapse counters change only for Again', () {
+      final initial = scheduler.review(_card(now), FsrsRating.again, reviewedAt: now);
+      expect(initial.state.difficulty, inInclusiveRange(1, 10));
+
+      final repeated = scheduler.review(
+        initial,
+        FsrsRating.easy,
+        reviewedAt: now.add(const Duration(days: 2)),
+      );
+      expect(repeated.state.difficulty, inInclusiveRange(1, 10));
+      expect(repeated.state.repetitions, 2);
+      expect(repeated.state.lapses, 1);
     });
 
     test('rejects invalid scheduler parameters and elapsed-time inputs', () {
       expect(() => FsrsScheduler(desiredRetention: 1), throwsArgumentError);
+      expect(() => FsrsScheduler(desiredRetention: double.nan), throwsArgumentError);
       expect(() => FsrsScheduler(maximumIntervalDays: 0), throwsArgumentError);
       expect(() => FsrsScheduler(weights: const <double>[1]), throwsArgumentError);
+      expect(
+        () => FsrsScheduler(
+          weights: <double>[
+            ...FsrsScheduler.defaultWeights.take(16),
+            double.infinity,
+          ],
+        ),
+        throwsArgumentError,
+      );
       expect(
         () => scheduler.retrievability(stabilityDays: 0, elapsedDays: 1),
         throwsArgumentError,
       );
       expect(
+        () => scheduler.retrievability(
+          stabilityDays: double.infinity,
+          elapsedDays: 1,
+        ),
+        throwsArgumentError,
+      );
+      expect(
         () => scheduler.retrievability(stabilityDays: 1, elapsedDays: -1),
+        throwsArgumentError,
+      );
+      expect(
+        () => scheduler.retrievability(stabilityDays: 1, elapsedDays: double.nan),
         throwsArgumentError,
       );
     });

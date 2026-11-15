@@ -53,21 +53,18 @@ final class OnDeviceEngineImpl extends LocalTutorEngineBase {
 
   @override
   Future<void> initialize() async {
-    await super.initialize();
     final credentials = hostPairingCredentials;
     if (credentials != null && !_hostStartAttempted) {
-      _hostStartAttempted = true;
-      try {
-        await startCompanionHost(
-          pairingKey: credentials.pairingKey,
-          databaseSyncService: databaseSyncService,
-          port: credentials.endpoint.port,
-        );
-      } on Object {
-        _hostStartAttempted = false;
-        rethrow;
-      }
+      await startCompanionHost(
+        pairingKey: credentials.pairingKey,
+        databaseSyncService: databaseSyncService,
+        port: credentials.endpoint.port,
+      );
     }
+    // Keep companion discovery and pairing available even when optional model
+    // weights have not been imported yet. Inference initialization can still
+    // fail explicitly later while the host bridge remains online.
+    await super.initialize();
   }
 
   Future<int> startCompanionHost({
@@ -76,7 +73,9 @@ final class OnDeviceEngineImpl extends LocalTutorEngineBase {
     int port = 0,
     Future<void> Function(StudentStylusEvent event)? onRemoteStylusEvent,
   }) async {
-    if (!isInitialized) await initialize();
+    if (_hostStartAttempted) {
+      throw StateError('Companion host has already been started for this tutor engine.');
+    }
     final server = LocalHostServer(
       pairingKey: pairingKey,
       onPcmChunk: (_, __) {},
@@ -93,7 +92,9 @@ final class OnDeviceEngineImpl extends LocalTutorEngineBase {
       onStylusEvent: onRemoteStylusEvent,
     );
     try {
-      return await server.start(port: port);
+      final boundPort = await server.start(port: port);
+      _hostStartAttempted = true;
+      return boundPort;
     } on Object {
       await detachCompanionServer();
       rethrow;
