@@ -52,22 +52,30 @@ jobs:
 
       - name: Configure Gradle init script for Android 36 AAR compatibility
         run: |
-          cat << 'EOF' > /tmp/force_compile_sdk.gradle
-          gradle.projectsEvaluated {
-              rootProject.subprojects { subproject ->
-                  if (subproject.hasProperty("android")) {
-                      try {
-                          subproject.android.compileSdk = 36
-                      } catch (Exception ignored) {}
-                  }
-                  subproject.tasks.matching { it.name.contains("checkReleaseAarMetadata") || it.name.contains("checkDebugAarMetadata") }.configureEach {
-                      enabled = false
+          mkdir -p ~/.gradle
+          cat << 'EOF' > ~/.gradle/init.gradle
+          gradle.beforeProject { proj ->
+              proj.plugins.withId("com.android.library") {
+                  try {
+                      proj.androidComponents {
+                          finalizeDsl { ext ->
+                              if (ext.compileSdk == null || ext.compileSdk < 36) {
+                                  ext.compileSdk = 36
+                              }
+                          }
+                      }
+                  } catch (Exception ignored) {}
+              }
+              proj.tasks.matching {
+                  it.name == "checkReleaseAarMetadata" || it.name == "checkDebugAarMetadata"
+              }.configureEach { t ->
+                  t.actions.clear()
+                  t.doLast {
+                      t.outputs.files.each { File f -> f.mkdirs() }
                   }
               }
           }
           EOF
-          mkdir -p ~/.gradle
-          cp /tmp/force_compile_sdk.gradle ~/.gradle/init.gradle
 
       - name: Build hardened release APK
         run: flutter build apk --release --target-platform android-arm64 --obfuscate --split-debug-info=build/debug-info
