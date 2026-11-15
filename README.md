@@ -49,7 +49,7 @@ Model files are large and are **not** Flutter assets or Git files. Install them 
 | `grammar` | Included whiteboard GBNF copied at first launch | `<app-support>/grammar/whiteboard.gbnf` |
 | `gemma4E4bGgufFallback` | Optional llama.cpp GGUF fallback | `gemma-4-e4b-fallback.gguf` |
 
-Use the in-app **Models** workspace to select compatible, licensed files from Downloads. Imports are streamed into app-private `<app-support>/models/` storage and catalogued by role, size and SHA-256; each import can be re-verified or removed. SHA-256 checks file integrity, not model compatibility, so use the accepted file formats and compatible conversions for the packaged LiteRT-LM backend. The catalog supplies absolute file paths to the runtime; model weights are never bundled in the APK. Document selection uses Android's system document picker and does not require broad storage access; `READ_EXTERNAL_STORAGE` is declared only for Android API 32 and earlier.
+Use the in-app **Models** workspace to download from preselected direct HTTPS sources where one is configured, or choose **Custom URL** to enter another direct file link. Downloads stream into app-private `<app-support>/models/` storage and are catalogued by role, size and locally computed SHA-256; each install can be re-verified or removed. The digest supports later file-integrity checks but does not authenticate the publisher or establish runtime compatibility. Check the model card and app backend requirements before downloading: a matching extension is not proof a model can run. Some roles intentionally have no preselected source because the discovered file was not a verified match for the runtime role. Downloaded model weights are never bundled in the APK.
 
 ### Build and verification
 
