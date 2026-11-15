@@ -3,7 +3,6 @@ import 'dart:typed_data';
 import 'package:edu/features/rag_notes/data/curriculum_rag_service.dart';
 import 'package:edu/features/rag_notes/data/document_ingestion_service.dart';
 import 'package:edu/features/rag_notes/data/sqlite_vec_store.dart';
-import 'package:edu/features/rag_notes/domain/entities/document_chunk.dart';
 import 'package:edu/features/voice_tutor/data/orchestrator/dynamic_model_orchestrator.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sqlite3/sqlite3.dart';
