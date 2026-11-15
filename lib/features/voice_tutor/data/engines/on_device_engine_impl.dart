@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:edu/features/companion_sync/data/server/local_host_server.dart';
 import 'package:edu/features/companion_sync/data/services/p2p_lan_database_sync_service.dart';

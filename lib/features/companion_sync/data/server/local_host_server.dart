@@ -89,11 +89,12 @@ final class LocalHostServer {
   bool get isRunning => _httpServer != null;
 
   /// Starts the server on all IPv4 interfaces by default and returns its port.
-  Future<int> start({InternetAddress address = InternetAddress.anyIPv4, int port = 0}) async {
+  Future<int> start({InternetAddress? address, int port = 0}) async {
     if (_disposed) throw StateError('Host server is disposed.');
     if (_httpServer != null) return _httpServer!.port;
+    final bindAddress = address ?? InternetAddress.anyIPv4;
     await _payloadWorker.start();
-    _httpServer = await shelf_io.serve(_handleRequest, address, port);
+    _httpServer = await shelf_io.serve(_handleRequest, bindAddress, port);
     final syncService = databaseSyncService;
     if (syncService != null) {
       await syncService.start(incoming: databaseMessages, send: sendDatabaseMessage);

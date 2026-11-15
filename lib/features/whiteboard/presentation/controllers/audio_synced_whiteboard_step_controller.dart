@@ -4,6 +4,7 @@ import 'dart:typed_data';
 
 import 'package:edu/features/whiteboard/domain/entities/whiteboard_sync_step.dart';
 import 'package:flutter/animation.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/scheduler.dart';
 
 /// Read-only hardware output clock. Frame positions must be monotonic and
