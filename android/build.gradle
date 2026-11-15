@@ -9,6 +9,27 @@ rootProject.buildDir = "../build"
 subprojects {
     project.buildDir = "${rootProject.buildDir}/${project.name}"
 }
+
+// Keep Flutter plugin Android libraries aligned with the app's compile SDK.
+// Register callbacks before evaluationDependsOn can evaluate :app early.
+subprojects { project ->
+    def setAndroidCompileSdk = {
+        def androidExtension = project.extensions.findByName("android")
+        if (androidExtension != null) {
+            androidExtension.compileSdk = 36
+        }
+    }
+    def enforceAndroidCompileSdk = {
+        if (project.state.executed) {
+            setAndroidCompileSdk()
+        } else {
+            project.afterEvaluate { evaluatedProject -> setAndroidCompileSdk() }
+        }
+    }
+    project.plugins.withId("com.android.library") { plugin -> enforceAndroidCompileSdk() }
+    project.plugins.withId("com.android.application") { plugin -> enforceAndroidCompileSdk() }
+}
+
 subprojects {
     project.evaluationDependsOn(":app")
 }
