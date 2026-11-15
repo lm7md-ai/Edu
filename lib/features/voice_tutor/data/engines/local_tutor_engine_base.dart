@@ -102,9 +102,9 @@ abstract class LocalTutorEngineBase implements TutorEngineRepository {
   }
 
   Future<void> _generate(TutorPrompt prompt) async {
-    if (!_initialized) await initialize();
     _activeRequestId = prompt.requestId;
     try {
+      if (!_initialized) await initialize();
       final snapshot = await snapshotProvider?.call() ?? _latestBoardSnapshot;
       final audioContext = _audioContextByRequest.remove(prompt.requestId);
       final contextBuilder = curriculumContextProvider;

@@ -5,6 +5,7 @@ import 'package:edu/core/execution/execution_mode.dart';
 import 'package:edu/features/companion_sync/data/services/mdns_discovery_service.dart';
 import 'package:edu/features/companion_sync/domain/entities/pairing_credentials.dart';
 import 'package:edu/features/companion_sync/presentation/widgets/execution_mode_pairing_screen.dart';
+import 'package:edu/features/voice_tutor/data/engines/on_device_engine_impl.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -39,8 +40,16 @@ final class _ModeSettingsScreenState extends ConsumerState<ModeSettingsScreen> {
       );
       ref.read(hostPairingCredentialsProvider.notifier).state = credentials;
       ref.read(executionModeProvider.notifier).state = ExecutionMode.standaloneHost;
+      final engine = ref.read(tutorEngineProvider);
+      if (engine is OnDeviceEngineImpl) {
+        await engine.startCompanionHost(
+          pairingKey: credentials.pairingKey,
+          port: credentials.endpoint.port,
+        );
+      }
       if (mounted) setState(() => _generatingHost = false);
     } on Object catch (error) {
+      ref.read(hostPairingCredentialsProvider.notifier).state = null;
       if (mounted) {
         setState(() {
           _generatingHost = false;

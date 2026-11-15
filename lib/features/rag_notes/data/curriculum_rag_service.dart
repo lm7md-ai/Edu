@@ -48,6 +48,18 @@ Use only the passages below for curriculum-specific claims. Cite every such clai
     return buffer.toString();
   }
 
+  /// Tutor-safe variant: missing weights or an unavailable vector index do not
+  /// block the model turn; the model is told to answer without invented local
+  /// citations until retrieval can run.
+  Future<String> groundedContextOrUnavailable(String question, {int? topK}) async {
+    try {
+      return await groundedContext(question, topK: topK);
+    } on Object catch (error) {
+      return '''LOCAL CURRICULUM SOURCES
+No local passages could be retrieved because the embedding runtime is unavailable ($error). Do not invent citations or imply that a local source was checked.''';
+    }
+  }
+
   Future<String> groundedTutorPrompt(String question, {int? topK}) async {
     final context = await groundedContext(question, topK: topK);
     return '''Student question:

@@ -1,6 +1,9 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:edu/features/model_manager/data/on_device_model_catalog.dart';
+import 'package:edu/features/model_manager/presentation/model_manager_providers.dart';
 import 'package:edu/features/rag_notes/data/curriculum_rag_service.dart';
 import 'package:edu/features/rag_notes/data/document_ingestion_service.dart';
 import 'package:edu/features/rag_notes/data/flashcard_generator.dart';
@@ -10,17 +13,16 @@ import 'package:edu/features/voice_tutor/data/native/native_runtime_config.dart'
 import 'package:edu/features/voice_tutor/data/orchestrator/dynamic_model_orchestrator.dart';
 import 'package:edu/features/voice_tutor/data/orchestrator/native_model_resources.dart';
 import 'package:edu/features/voice_tutor/data/workers/native_model_isolate_worker.dart';
-import 'package:edu/app/providers/engine_providers.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:sqlite3/sqlite3.dart' as sqlite;
 
 final Provider<int> ragEmbeddingDimensionsProvider = Provider<int>((ref) => 1024);
 final Provider<String?> sqliteVecExtensionPathProvider = Provider<String?>((ref) => null);
 
-final FutureProvider<SqliteVecStore> sqliteVecStoreProvider =
-    FutureProvider<SqliteVecStore>((ref) async {
-  final directory = await getApplicationSupportDirectory();
+/// Synchronous SQLite open from the already initialized app-support model
+/// catalog keeps local notes/card management available without any model files.
+final Provider<SqliteVecStore> sqliteVecStoreProvider = Provider<SqliteVecStore>((ref) {
+  final directory = OnDeviceModelCatalog.instance.supportDirectory;
   final databasePath = '${directory.path}${Platform.pathSeparator}curriculum_rag.sqlite';
   final extensionPath = ref.watch(sqliteVecExtensionPathProvider);
   final store = SqliteVecStore(
@@ -34,29 +36,45 @@ final FutureProvider<SqliteVecStore> sqliteVecStoreProvider =
   return store;
 });
 
+/// The BGE-M3/E5 resource is not loaded until an embed operation starts.
 final Provider<DynamicModelOrchestrator> ragModelOrchestratorProvider =
     Provider<DynamicModelOrchestrator>((ref) {
-  final paths = ref.watch(tutorEngineRuntimeDependenciesProvider).modelPaths;
-  final dimensions = ref.watch(ragEmbeddingDimensionsProvider);
+  ref.watch(modelCatalogRevisionProvider);
+  final catalog = OnDeviceModelCatalog.instance;
   final model = NativeEmbeddingModelResource(
     config: NativeRuntimeConfig(
       modelId: 'bge-m3-or-multilingual-e5',
-      modelPath: paths.multilingualEmbedding,
+      modelPath: catalog.pathFor(OnDeviceModelId.bgeM3),
       backend: NativeModelBackend.liteRtLm,
       quantization: 'INT8',
       accelerator: NativeAccelerator.cpu,
       contextTokens: 512,
-      grammarPath: paths.grammar,
+      grammarPath: catalog.grammarPath,
     ),
-    driver: ref.watch(tutorEngineRuntimeDependenciesProvider).workerDriver,
+    driver: Platform.isAndroid
+        ? NativeWorkerDriver.androidMethodChannel
+        : NativeWorkerDriver.ffi,
   );
-  return DynamicModelOrchestrator(
+  final orchestrator = DynamicModelOrchestrator(
     warmModels: <WarmModelRole, ManagedModelResource>{
       for (final role in WarmModelRole.values) role: _IdleWarmResource(role.name),
     },
-    embeddingModel: _DimensionCheckingEmbeddingResource(model, dimensions),
+    embeddingModel: _DimensionCheckingEmbeddingResource(
+      model,
+      ref.watch(ragEmbeddingDimensionsProvider),
+    ),
   );
+  ref.onDispose(() => unawaited(orchestrator.dispose()));
+  return orchestrator;
 });
+
+/// Shared service injected into host and Light Edge tutor prompts as well as
+/// the Curriculum workspace. It stays usable without preloaded embedding data.
+final Provider<CurriculumRagService> curriculumRagServiceProvider =
+    Provider<CurriculumRagService>((ref) => CurriculumRagService(
+          modelOrchestrator: ref.watch(ragModelOrchestratorProvider),
+          vectorStore: ref.watch(sqliteVecStoreProvider),
+        ));
 
 final class RagWorkspaceDependencies {
   const RagWorkspaceDependencies({
@@ -75,23 +93,18 @@ final class RagWorkspaceDependencies {
 }
 
 final FutureProvider<RagWorkspaceDependencies> ragWorkspaceDependenciesProvider =
-    FutureProvider<RagWorkspaceDependencies>((ref) async {
-  final store = await ref.watch(sqliteVecStoreProvider.future);
-  final orchestrator = ref.watch(ragModelOrchestratorProvider);
-  return RagWorkspaceDependencies(
-    store: store,
-    ingestion: DocumentIngestionService(
-      modelOrchestrator: orchestrator,
-      vectorStore: store,
-    ),
-    ragService: CurriculumRagService(
-      modelOrchestrator: orchestrator,
-      vectorStore: store,
-    ),
-    flashcardGenerator: FlashcardGenerator(),
-    fsrsScheduler: FsrsScheduler(),
-  );
-});
+    FutureProvider<RagWorkspaceDependencies>((ref) => Future<RagWorkspaceDependencies>.value(
+          RagWorkspaceDependencies(
+            store: ref.watch(sqliteVecStoreProvider),
+            ingestion: DocumentIngestionService(
+              modelOrchestrator: ref.watch(ragModelOrchestratorProvider),
+              vectorStore: ref.watch(sqliteVecStoreProvider),
+            ),
+            ragService: ref.watch(curriculumRagServiceProvider),
+            flashcardGenerator: FlashcardGenerator(),
+            fsrsScheduler: FsrsScheduler(),
+          ),
+        ));
 
 final class _IdleWarmResource implements ManagedModelResource {
   _IdleWarmResource(this.modelId);
@@ -136,7 +149,9 @@ final class _DimensionCheckingEmbeddingResource implements EmbeddingModelResourc
   Future<Float32List> embed(String document) async {
     final embedding = await delegate.embed(document);
     if (embedding.length != expectedDimensions) {
-      throw StateError('Configured vector dimension $expectedDimensions does not match model output ${embedding.length}.');
+      throw StateError(
+        'Configured vector dimension $expectedDimensions does not match model output ${embedding.length}.',
+      );
     }
     return embedding;
   }

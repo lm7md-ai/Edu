@@ -1,11 +1,16 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:edu/app/providers/safe_runtime_bindings.dart';
 import 'package:edu/core/execution/execution_mode.dart';
 import 'package:edu/features/companion_sync/data/engines/lan_companion_engine_impl.dart';
 import 'package:edu/features/companion_sync/data/services/p2p_lan_database_sync_service.dart';
 import 'package:edu/features/companion_sync/domain/entities/pairing_credentials.dart';
+import 'package:edu/features/model_manager/data/on_device_model_catalog.dart';
+import 'package:edu/features/model_manager/presentation/model_manager_providers.dart';
 import 'package:edu/features/rag_notes/data/curriculum_rag_service.dart';
+import 'package:edu/features/rag_notes/presentation/rag_notes_providers.dart';
 import 'package:edu/features/voice_tutor/data/engines/light_edge_engine_impl.dart';
 import 'package:edu/features/voice_tutor/data/engines/on_device_engine_impl.dart';
 import 'package:edu/features/voice_tutor/data/native/native_runtime_config.dart';
@@ -17,8 +22,8 @@ import 'package:edu/features/voice_tutor/domain/repositories/tutor_engine_reposi
 import 'package:edu/features/whiteboard/presentation/controllers/whiteboard_canvas_controller.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-/// Filesystem paths are resolved by the app's model installer and supplied as
-/// an override; model weights are not bundled in the source repository.
+/// Absolute model paths resolved from the app-private install catalog. A
+/// model's path exists as a safe expected location before weights are imported.
 final class TutorModelPaths {
   const TutorModelPaths({
     required this.gemma4E4b,
@@ -41,9 +46,9 @@ final class TutorModelPaths {
   final String? gemma4E4bGgufFallback;
 }
 
-/// Platform-owned capture, playback, model paths and optional pairing state.
-/// The UI overrides this provider after it has created the hardware audio
-/// scheduler and resolved downloaded model locations.
+/// Runtime composition for the selected tutor mode. The default provider is
+/// fully usable for app navigation, board drawing and pairing; product audio
+/// capture/playback can override it with hardware adapters.
 final class TutorEngineRuntimeDependencies {
   const TutorEngineRuntimeDependencies({
     required this.modelPaths,
@@ -79,11 +84,39 @@ final StateProvider<PairingCredentials?> hostPairingCredentialsProvider =
 final StateProvider<PairingCredentials?> pairedHostCredentialsProvider =
     StateProvider<PairingCredentials?>((ref) => null);
 
+/// The app shell supplies a ticker-owned controller. Keeping this as a state
+/// provider lets the runtime wiring remain safe before any model is installed.
+final StateProvider<WhiteboardCanvasController?> activeWhiteboardControllerProvider =
+    StateProvider<WhiteboardCanvasController?>((ref) => null);
+
+/// Default composition supports the complete app shell before model import.
+/// It uses app-private expected model paths, an empty mic stream and a
+/// fail-closed idle playback sink. Product audio capture/output can override
+/// this provider with native hardware bindings.
 final Provider<TutorEngineRuntimeDependencies> tutorEngineRuntimeDependenciesProvider =
     Provider<TutorEngineRuntimeDependencies>((ref) {
-  throw StateError(
-    'Override tutorEngineRuntimeDependenciesProvider with installed model paths, '
-    'microphone capture, and the audio-synchronized playback sink.',
+  ref.watch(modelCatalogRevisionProvider);
+  final controller = ref.watch(activeWhiteboardControllerProvider);
+  final catalog = OnDeviceModelCatalog.instance;
+  return TutorEngineRuntimeDependencies(
+    modelPaths: TutorModelPaths(
+      gemma4E4b: catalog.pathFor(OnDeviceModelId.gemma4E4b),
+      gemma4E2b: catalog.pathFor(OnDeviceModelId.gemma4E2b),
+      sileroVad: catalog.pathFor(OnDeviceModelId.sileroVad),
+      moonshineWhisperAsr: catalog.pathFor(OnDeviceModelId.moonshineAsr),
+      kokoro82m: catalog.pathFor(OnDeviceModelId.kokoro82m),
+      multilingualEmbedding: catalog.pathFor(OnDeviceModelId.bgeM3),
+      grammar: catalog.grammarPath,
+    ),
+    workerDriver: Platform.isAndroid
+        ? NativeWorkerDriver.androidMethodChannel
+        : NativeWorkerDriver.ffi,
+    playbackSink: controller == null
+        ? const UnavailableTutorStepPlaybackSink()
+        : AudioSyncedWhiteboardPlaybackSink(controller),
+    microphonePcmStream: () => const Stream<Uint8List>.empty(),
+    whiteboardController: controller,
+    curriculumRagService: ref.watch(curriculumRagServiceProvider),
   );
 });
 
@@ -128,7 +161,7 @@ final Provider<TutorEngineRepository> tutorEngineProvider =
             : (event) {
                 dependencies.whiteboardController!.applyRemoteStylusEvent(event);
               },
-        curriculumContextProvider: dependencies.curriculumRagService?.groundedContext,
+        curriculumContextProvider: dependencies.curriculumRagService?.groundedContextOrUnavailable,
       );
       break;
     case ExecutionMode.lanCompanion:
@@ -166,7 +199,7 @@ final Provider<TutorEngineRepository> tutorEngineProvider =
         modelConfig: llmConfig,
         microphonePcmStream: dependencies.microphonePcmStream,
         snapshotProvider: dependencies.snapshotProvider,
-        curriculumContextProvider: dependencies.curriculumRagService?.groundedContext,
+        curriculumContextProvider: dependencies.curriculumRagService?.groundedContextOrUnavailable,
       );
       break;
   }

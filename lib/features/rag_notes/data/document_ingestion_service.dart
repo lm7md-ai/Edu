@@ -203,12 +203,15 @@ final class DocumentIngestionService {
   final int maxChunkCharacters;
   final int overlapWords;
 
-  Future<List<DocumentChunk>> ingest({
+  /// Extracts local chunks without requiring an embedding model. The workspace
+  /// can persist and turn these into review cards before vector indexing is
+  /// available.
+  List<DocumentChunk> extractChunks({
     required String sourceId,
     required String documentTitle,
     required String filename,
     required Uint8List bytes,
-  }) async {
+  }) {
     if (sourceId.trim().isEmpty || documentTitle.trim().isEmpty || bytes.isEmpty) {
       throw ArgumentError('Source id, title and document bytes are required.');
     }
@@ -216,9 +219,26 @@ final class DocumentIngestionService {
     final sections = _parseSections(format, bytes, documentTitle);
     final chunks = _chunkSections(sourceId, documentTitle, sections);
     if (chunks.isEmpty) throw const FormatException('Document contains no extractable text.');
+    return List<DocumentChunk>.unmodifiable(chunks);
+  }
 
-    // Embeddings are materialized only for this indexing call. The orchestrator
-    // unloads its lazy model even if any document embedding throws.
+  Future<List<DocumentChunk>> ingest({
+    required String sourceId,
+    required String documentTitle,
+    required String filename,
+    required Uint8List bytes,
+  }) =>
+      indexChunks(extractChunks(
+        sourceId: sourceId,
+        documentTitle: documentTitle,
+        filename: filename,
+        bytes: bytes,
+      ));
+
+  /// Embeds and persists already-extracted chunks, keeping ingestion and local
+  /// note/card storage independent from the optional model's availability.
+  Future<List<DocumentChunk>> indexChunks(List<DocumentChunk> chunks) async {
+    if (chunks.isEmpty) throw ArgumentError.value(chunks, 'chunks');
     final embeddings = await modelOrchestrator.indexDocuments(
       chunks.map((chunk) => chunk.text).toList(growable: false),
     );
