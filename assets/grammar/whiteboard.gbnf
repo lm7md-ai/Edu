@@ -1,0 +1,19 @@
+# Constrained JSON shape for WhiteboardSyncStep.
+# Semantic constraints (uint32 step ids, normalized coordinate range, action
+# requirements, and maximum lengths/counts) are enforced by the domain model.
+root ::= ws "{" ws "\"step_id\"" ws ":" ws uint ws "," ws "\"speech_text\"" ws ":" ws string ws "," ws "\"actions\"" ws ":" ws actions ws "}" ws
+
+actions ::= "[" ws (action (ws "," ws action)*)? ws "]"
+action ::= "{" ws "\"op\"" ws ":" ws operation ws "," ws "\"target_id\"" ws ":" ws nullable_string ws "," ws "\"x\"" ws ":" ws nullable_number ws "," ws "\"y\"" ws ":" ws nullable_number ws "," ws "\"end_x\"" ws ":" ws nullable_number ws "," ws "\"end_y\"" ws ":" ws nullable_number ws "," ws "\"content\"" ws ":" ws nullable_string ws "," ws "\"style\"" ws ":" ws nullable_style ws "}"
+
+operation ::= "\"draw_node\"" | "\"draw_arrow\"" | "\"write_math\"" | "\"highlight\"" | "\"clear\""
+nullable_style ::= style | "null"
+style ::= "\"primary\"" | "\"accent\"" | "\"warning\"" | "\"dashed\""
+nullable_string ::= string | "null"
+nullable_number ::= number | "null"
+uint ::= "0" | [1-9] [0-9]*
+number ::= "-"? ("0" | [1-9] [0-9]*) ("." [0-9]+)? ([eE] [+-]? [0-9]+)?
+string ::= "\"" char* "\""
+char ::= [^"\\\x00-\x1F] | "\\" (["\\/bfnrt] | "u" hex hex hex hex)
+hex ::= [0-9a-fA-F]
+ws ::= [ \t\n\r]*
