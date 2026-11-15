@@ -11,6 +11,7 @@ import 'package:edu/features/voice_tutor/data/workers/realtime_voice_worker.dart
 import 'package:edu/features/voice_tutor/domain/entities/tutor_engine_event.dart';
 import 'package:edu/features/voice_tutor/domain/entities/tutor_prompt.dart';
 import 'package:edu/features/whiteboard/domain/entities/whiteboard_sync_step.dart';
+import 'package:edu/features/whiteboard/presentation/controllers/audio_synced_whiteboard_step_controller.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
